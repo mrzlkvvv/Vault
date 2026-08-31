@@ -1,0 +1,69 @@
+services:
+  backend:
+    profiles: ["prod"]
+    container_name: backend
+    build:
+      context: ..
+      dockerfile: ./deploy/Dockerfile
+    env_file:
+      - ../config/postgres.env
+      - ../config/rustfs.env
+      - ../config/valkey.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    container_name: postgres
+    image: postgres:18-alpine
+    env_file:
+      - ../config/postgres.env
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    restart: unless-stopped
+
+  rustfs:
+    container_name: rustfs
+    image: rustfs/rustfs:latest
+    env_file:
+      - ../config/rustfs.env
+    ports:
+      - "9001:9001" # Console in web
+      - "127.0.0.1:9000:9000" # S3 API from localhost (for "healthcheck")
+    volumes:
+      - rustfs_data:/data
+    environment:
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+    restart: unless-stopped
+
+  valkey:
+    container_name: valkey
+    image: valkey/valkey:9-alpine
+    env_file:
+      - ../config/valkey.env
+    command: valkey-server --requirepass ${VALKEY_PASSWORD:-secret}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD:-secret}", "ping"]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  rustfs_data:
+  valkey_data:
